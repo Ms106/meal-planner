@@ -85,6 +85,11 @@ export default function GeneralList({ householdId, userId }) {
     supabase.from("general_list_items").update({ checked: !currentChecked }).eq("id", id)
   }
 
+  function deleteItem(id) {
+    setItems(prev => prev.filter(i => i.id !== id))
+    supabase.from("general_list_items").delete().eq("id", id)
+  }
+
   function clearChecked() {
     // Optimistic update — no await
     setItems(prev => prev.filter(i => !i.checked))
@@ -200,10 +205,12 @@ export default function GeneralList({ householdId, userId }) {
                   {catItems.map(item => (
                     <div
                       key={item.id}
-                      onClick={() => toggleItem(item.id, item.checked)}
-                      className={`flex items-center justify-between px-4 py-3 cursor-pointer transition-colors ${item.checked ? "bg-gray-50" : ""}`}
+                      className={`flex items-center justify-between px-4 py-3 transition-colors ${item.checked ? "bg-gray-50" : ""}`}
                     >
-                      <div className="flex items-center gap-3">
+                      <div
+                        className="flex items-center gap-3 flex-1 cursor-pointer"
+                        onClick={() => toggleItem(item.id, item.checked)}
+                      >
                         <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 ${item.checked ? "bg-green-600 border-green-600" : "border-gray-300"}`}>
                           {item.checked && <span className="text-white text-xs">✓</span>}
                         </div>
@@ -211,9 +218,17 @@ export default function GeneralList({ householdId, userId }) {
                           {item.name}
                         </span>
                       </div>
-                      <span className={`text-sm font-medium tabular-nums ${item.checked ? "text-gray-300" : "text-gray-500"}`}>
-                        {formatQty(item.quantity)}{item.quantity && item.unit !== "other" ? ` ${item.unit}` : ""}
-                      </span>
+                      <div className="flex items-center gap-3">
+                        <span className={`text-sm font-medium tabular-nums ${item.checked ? "text-gray-300" : "text-gray-500"}`}>
+                          {formatQty(item.quantity)}{item.quantity && item.unit !== "other" ? ` ${item.unit}` : ""}
+                        </span>
+                        <button
+                          onClick={() => deleteItem(item.id)}
+                          className="text-gray-300 hover:text-red-400 text-lg leading-none"
+                        >
+                          ×
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
