@@ -63,7 +63,8 @@ export default function Recipes({ householdId }) {
       }
 
 if (newIngredients.length > 0) {
-        const { data: inserted } = await supabase.from("ingredients").insert(
+        const { data: inserted, error: insertError } = await supabase.from("ingredients").insert(
+            if (insertError) console.error("Insert error:", insertError)
           newIngredients.map(i => ({ name: i.name, category: "Other", default_unit: i.unit || "whole", always_stocked: false, household_id: householdId }))
         ).select()
 
