@@ -4,6 +4,7 @@ import Auth from "./Auth"
 import Ingredients from "./Ingredients"
 import Recipes from "./Recipes"
 import MealPlan from "./MealPlan"
+import ShoppingList from "./ShoppingList"
 
 const NAV_ITEMS = ["Ingredients", "Recipes", "Meal Plan", "Shopping List"]
 
@@ -57,6 +58,7 @@ function App() {
         {currentPage === "Shopping List" && <p className="text-gray-400 text-sm">Shopping List — coming soon</p>}
 {currentPage === "Recipes" && <Recipes userId={session.user.id} />}
 {currentPage === "Meal Plan" && <MealPlan userId={session.user.id} />}
+{currentPage === "Shopping List" && <ShoppingList userId={session.user.id} />}
       </main>
     </div>
   )
