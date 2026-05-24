@@ -64,7 +64,16 @@ export default function Recipes({ householdId }) {
       const newIngredients = []
 
       for (const item of parsed) {
-        const existing = ingredients.find(i => i.name.toLowerCase() === item.name.toLowerCase())
+        const itemWords = item.name.toLowerCase().split(" ")
+        const existing = ingredients.find(i => {
+          const ingWords = i.name.toLowerCase().split(" ")
+          // Exact match
+          if (i.name.toLowerCase() === item.name.toLowerCase()) return true
+          // One is contained within the other (e.g. "Garlic" vs "Garlic Cloves")
+          if (itemWords.every(w => ingWords.includes(w))) return true
+          if (ingWords.every(w => itemWords.includes(w))) return true
+          return false
+        })
         if (existing) {
           newRows.push({ ingredient_id: existing.id, quantity: item.quantity || "", unit: item.unit || "whole", preparation: item.preparation || "" })
         } else {
