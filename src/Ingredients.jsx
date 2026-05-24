@@ -12,10 +12,27 @@ const UNITS = [
   "can", "jar", "packet", "sachet", "pinch", "other"
 ]
 
+function mapCategory(cat) {
+  const map = {
+    "Meat and Seafood": "Meat & Seafood",
+    "Dairy and Eggs": "Dairy & Eggs",
+    "Deli": "Deli & Charcuterie",
+    "Pantry Dry": "Pantry — Dry",
+    "Pantry Condiments": "Pantry — Condiments",
+  }
+  return map[cat] || cat || "Other"
+}
+
 export default function Ingredients({ householdId }) {
   const [ingredients, setIngredients] = useState([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
+  const [showBulk, setShowBulk] = useState(false)
+  const [bulkText, setBulkText] = useState("")
+  const [bulkParsed, setBulkParsed] = useState(null)
+  const [bulkParsing, setBulkParsing] = useState(false)
+  const [bulkSaving, setBulkSaving] = useState(false)
+  const [bulkError, setBulkError] = useState("")
   const [editingId, setEditingId] = useState(null)
   const [editForm, setEditForm] = useState({})
   const [mergingId, setMergingId] = useState(null)
@@ -70,17 +87,78 @@ export default function Ingredients({ householdId }) {
   async function mergeIngredient(fromId, toId) {
     if (!toId) return
     setSaving(true)
-    // Move all recipe_ingredients to the target
-    await supabase
-      .from("recipe_ingredients")
-      .update({ ingredient_id: toId })
-      .eq("ingredient_id", fromId)
-    // Delete the duplicate
+    await supabase.from("recipe_ingredients").update({ ingredient_id: toId }).eq("ingredient_id", fromId)
     await supabase.from("ingredients").delete().eq("id", fromId)
     setMergingId(null)
     setMergeTargetId("")
     await fetchIngredients()
     setSaving(false)
+  }
+
+  async function parseBulk() {
+    if (!bulkText.trim()) return
+    setBulkParsing(true)
+    setBulkError("")
+    setBulkParsed(null)
+    try {
+      const res = await fetch("/api/parse-ingredients", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: bulkText,
+          recipeName: "bulk ingredient import"
+        })
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || "Parse failed")
+
+      // Filter out ones that already exist
+      const existing = ingredients.map(i => i.name.toLowerCase())
+      const filtered = data.ingredients.filter(i => {
+        const words = i.name.toLowerCase().split(" ")
+        return !existing.some(e => {
+          const eWords = e.split(" ")
+          return words.every(w => eWords.includes(w)) || eWords.every(w => words.includes(w))
+        })
+      }).map(i => ({ ...i, category: mapCategory(i.category), selected: true }))
+
+      setBulkParsed(filtered)
+    } catch (err) {
+      setBulkError(err.message)
+    }
+    setBulkParsing(false)
+  }
+
+  async function saveBulk() {
+    const toSave = bulkParsed.filter(i => i.selected)
+    if (toSave.length === 0) return
+    setBulkSaving(true)
+    await supabase.from("ingredients").insert(
+      toSave.map(i => ({
+        name: i.name,
+        category: i.category,
+        default_unit: i.unit || "whole",
+        always_stocked: false,
+        household_id: householdId
+      }))
+    )
+    setBulkParsed(null)
+    setBulkText("")
+    setShowBulk(false)
+    await fetchIngredients()
+    setBulkSaving(false)
+  }
+
+  function toggleBulkItem(index) {
+    const updated = [...bulkParsed]
+    updated[index].selected = !updated[index].selected
+    setBulkParsed(updated)
+  }
+
+  function updateBulkItem(index, field, value) {
+    const updated = [...bulkParsed]
+    updated[index][field] = value
+    setBulkParsed(updated)
   }
 
   function startEdit(ing) {
@@ -111,13 +189,104 @@ export default function Ingredients({ householdId }) {
     <div>
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-lg font-semibold text-gray-800">Ingredients</h2>
-        <button
-          onClick={() => setShowForm(!showForm)}
-          className="bg-green-700 text-white px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-green-800"
-        >
-          + Add
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => { setShowBulk(!showBulk); setShowForm(false); setBulkParsed(null) }}
+            className="border border-green-700 text-green-700 px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-green-50"
+          >
+            Bulk import
+          </button>
+          <button
+            onClick={() => { setShowForm(!showForm); setShowBulk(false) }}
+            className="bg-green-700 text-white px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-green-800"
+          >
+            + Add
+          </button>
+        </div>
       </div>
+
+      {showBulk && (
+        <div className="bg-white rounded-xl shadow-sm p-4 mb-4 space-y-3">
+          <p className="font-medium text-gray-700 text-sm">Bulk ingredient import</p>
+          <p className="text-xs text-gray-400">Paste a list of ingredient names, one per line. AI will assign categories and units. Duplicates are automatically filtered out.</p>
+
+          {!bulkParsed ? (
+            <>
+              <textarea
+                placeholder={"Chicken breast\nOnion\nGarlic\nOlive oil\nParmesan\nBasmati rice\n..."}
+                value={bulkText}
+                onChange={e => setBulkText(e.target.value)}
+                rows={8}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 font-mono"
+              />
+              {bulkError && <p className="text-xs text-red-500">{bulkError}</p>}
+              <div className="flex gap-2">
+                <button
+                  onClick={parseBulk}
+                  disabled={bulkParsing || !bulkText.trim()}
+                  className="flex-1 bg-green-700 text-white rounded-lg py-2 text-sm font-medium hover:bg-green-800 disabled:opacity-50"
+                >
+                  {bulkParsing ? "Parsing..." : "Parse ingredients"}
+                </button>
+                <button
+                  onClick={() => { setShowBulk(false); setBulkText("") }}
+                  className="flex-1 border border-gray-300 rounded-lg py-2 text-sm text-gray-600 hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <p className="text-xs text-gray-500">{bulkParsed.filter(i => i.selected).length} of {bulkParsed.length} ingredients selected. Untick any you don't want. Edit category or unit inline.</p>
+              <div className="border border-gray-200 rounded-lg divide-y divide-gray-100 max-h-96 overflow-y-auto">
+                {bulkParsed.map((item, index) => (
+                  <div key={index} className={`flex items-center gap-2 px-3 py-2 ${!item.selected ? "opacity-40" : ""}`}>
+                    <input
+                      type="checkbox"
+                      checked={item.selected}
+                      onChange={() => toggleBulkItem(index)}
+                      className="flex-shrink-0"
+                    />
+                    <span className="text-sm text-gray-800 w-32 flex-shrink-0">{item.name}</span>
+                    <select
+                      value={item.category}
+                      onChange={e => updateBulkItem(index, "category", e.target.value)}
+                      disabled={!item.selected}
+                      className="flex-1 border border-gray-200 rounded px-1 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-green-500"
+                    >
+                      {CATEGORIES.map(c => <option key={c}>{c}</option>)}
+                    </select>
+                    <select
+                      value={item.unit}
+                      onChange={e => updateBulkItem(index, "unit", e.target.value)}
+                      disabled={!item.selected}
+                      className="w-20 border border-gray-200 rounded px-1 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-green-500"
+                    >
+                      {UNITS.map(u => <option key={u}>{u}</option>)}
+                    </select>
+                  </div>
+                ))}
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={saveBulk}
+                  disabled={bulkSaving || bulkParsed.filter(i => i.selected).length === 0}
+                  className="flex-1 bg-green-700 text-white rounded-lg py-2 text-sm font-medium hover:bg-green-800 disabled:opacity-50"
+                >
+                  {bulkSaving ? "Saving..." : `Save ${bulkParsed.filter(i => i.selected).length} ingredients`}
+                </button>
+                <button
+                  onClick={() => { setBulkParsed(null); setBulkText("") }}
+                  className="flex-1 border border-gray-300 rounded-lg py-2 text-sm text-gray-600 hover:bg-gray-50"
+                >
+                  Back
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
 
       {showForm && (
         <div className="bg-white rounded-xl shadow-sm p-4 mb-4 space-y-3">
@@ -240,12 +409,11 @@ export default function Ingredients({ householdId }) {
                           className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
                         >
                           <option value="">Select ingredient...</option>
-                          {ingredients
-                            .filter(i => i.id !== ing.id)
-                            .map(i => <option key={i.id} value={i.id}>{i.name}</option>)
-                          }
+                          {ingredients.filter(i => i.id !== ing.id).map(i => (
+                            <option key={i.id} value={i.id}>{i.name}</option>
+                          ))}
                         </select>
-                        <p className="text-xs text-gray-400">All recipes using {ing.name} will be updated to use the selected ingredient. {ing.name} will be deleted.</p>
+                        <p className="text-xs text-gray-400">All recipes using {ing.name} will be updated. {ing.name} will be deleted.</p>
                         <div className="flex gap-2">
                           <button
                             onClick={() => mergeIngredient(ing.id, mergeTargetId)}
@@ -272,24 +440,9 @@ export default function Ingredients({ householdId }) {
                           </p>
                         </div>
                         <div className="flex items-center gap-3">
-                          <button
-                            onClick={() => startEdit(ing)}
-                            className="text-xs text-gray-400 hover:text-green-700"
-                          >
-                            Edit
-                          </button>
-                          <button
-                            onClick={() => startMerge(ing.id)}
-                            className="text-xs text-gray-400 hover:text-orange-600"
-                          >
-                            Merge
-                          </button>
-                          <button
-                            onClick={() => deleteIngredient(ing.id)}
-                            className="text-gray-300 hover:text-red-400 text-lg leading-none"
-                          >
-                            ×
-                          </button>
+                          <button onClick={() => startEdit(ing)} className="text-xs text-gray-400 hover:text-green-700">Edit</button>
+                          <button onClick={() => startMerge(ing.id)} className="text-xs text-gray-400 hover:text-orange-600">Merge</button>
+                          <button onClick={() => deleteIngredient(ing.id)} className="text-gray-300 hover:text-red-400 text-lg leading-none">×</button>
                         </div>
                       </div>
                     )}
