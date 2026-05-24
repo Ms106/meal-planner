@@ -3,6 +3,7 @@ import { supabase } from "./supabaseClient"
 import Auth from "./Auth"
 import Ingredients from "./Ingredients"
 import Recipes from "./Recipes"
+import MealPlan from "./MealPlan"
 
 const NAV_ITEMS = ["Ingredients", "Recipes", "Meal Plan", "Shopping List"]
 
@@ -55,6 +56,7 @@ function App() {
         {currentPage === "Meal Plan" && <p className="text-gray-400 text-sm">Meal Plan — coming soon</p>}
         {currentPage === "Shopping List" && <p className="text-gray-400 text-sm">Shopping List — coming soon</p>}
 {currentPage === "Recipes" && <Recipes userId={session.user.id} />}
+{currentPage === "Meal Plan" && <MealPlan userId={session.user.id} />}
       </main>
     </div>
   )
