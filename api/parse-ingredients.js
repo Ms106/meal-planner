@@ -3,7 +3,6 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "Method not allowed" })
   }
 
-  // Parse body if it's a string
   let body = req.body
   if (typeof body === "string") {
     try { body = JSON.parse(body) } catch { body = {} }
@@ -13,7 +12,9 @@ export default async function handler(req, res) {
 
   if (!text) {
     return res.status(400).json({ error: "No ingredient text provided" })
-  }  try {
+  }
+
+  try {
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -34,12 +35,14 @@ Each item in the array should have these fields:
 - quantity: number or null (numeric amount only)
 - unit: string (must be one of: g, kg, ml, l, tsp, tbsp, whole, rasher, slice, sheet, sprig, bunch, head, clove, fillet, steak, can, jar, packet, sachet, pinch, other)
 - preparation: string (e.g. "diced", "minced", or "" if none)
+- category: string (must be one of: Produce, Meat & Seafood, Dairy & Eggs, Deli & Charcuterie, Bakery, Pantry — Dry, Pantry — Condiments, Frozen, Drinks, Other)
 
 Rules:
 - Convert imperial to metric: oz to g (multiply by 28.35, round to nearest 5), cups to ml (multiply by 240), lb to g (multiply by 453.6)
 - If something is clearly countable (eggs, onions, sausages) use "whole" as unit
 - If quantity is "to taste" or missing, set quantity to null and unit to "pinch"
 - Strip any parenthetical clarifications from the name
+- Category guide: fresh fruit/veg = Produce, raw meat/fish = Meat & Seafood, milk/cheese/eggs/butter = Dairy & Eggs, cured meats/deli = Deli & Charcuterie, bread = Bakery, dried pasta/rice/canned goods = Pantry -- Dry, oils/spices/sauces/condiments = Pantry -- Condiments, frozen items = Frozen
 
 Recipe name for context: ${recipeName || "Unknown"}
 
