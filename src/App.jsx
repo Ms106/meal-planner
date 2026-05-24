@@ -2,6 +2,7 @@ import { useEffect, useState } from "react"
 import { supabase } from "./supabaseClient"
 import Auth from "./Auth"
 import Ingredients from "./Ingredients"
+import Recipes from "./Recipes"
 
 const NAV_ITEMS = ["Ingredients", "Recipes", "Meal Plan", "Shopping List"]
 
@@ -53,6 +54,7 @@ function App() {
         {currentPage === "Recipes" && <p className="text-gray-400 text-sm">Recipes — coming soon</p>}
         {currentPage === "Meal Plan" && <p className="text-gray-400 text-sm">Meal Plan — coming soon</p>}
         {currentPage === "Shopping List" && <p className="text-gray-400 text-sm">Shopping List — coming soon</p>}
+{currentPage === "Recipes" && <Recipes userId={session.user.id} />}
       </main>
     </div>
   )
