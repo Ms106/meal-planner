@@ -39,8 +39,16 @@ export default function ShoppingList({ householdId }) {
     const subscription = supabase
       .channel("shopping_list_general")
       .on("postgres_changes",
-        { event: "*", schema: "public", table: "general_list_items" },
-        () => fetchGeneralItems()
+        { event: "INSERT", schema: "public", table: "general_list_items" },
+        ({ new: row }) => setGeneralItems(prev => [...prev, row])
+      )
+      .on("postgres_changes",
+        { event: "UPDATE", schema: "public", table: "general_list_items" },
+        ({ new: row }) => setGeneralItems(prev => prev.map(i => i.id === row.id ? row : i))
+      )
+      .on("postgres_changes",
+        { event: "DELETE", schema: "public", table: "general_list_items" },
+        ({ old: row }) => setGeneralItems(prev => prev.filter(i => i.id !== row.id))
       )
       .subscribe()
     return () => supabase.removeChannel(subscription)
@@ -120,8 +128,9 @@ export default function ShoppingList({ householdId }) {
     setGeneralLoading(false)
   }
 
-  async function toggleGeneralItem(id, currentChecked) {
-    await supabase.from("general_list_items").update({ checked: !currentChecked }).eq("id", id)
+  function toggleGeneralItem(id, currentChecked) {
+    setGeneralItems(prev => prev.map(i => i.id === id ? { ...i, checked: !currentChecked } : i))
+    supabase.from("general_list_items").update({ checked: !currentChecked }).eq("id", id)
   }
 
   function prevWeek() {

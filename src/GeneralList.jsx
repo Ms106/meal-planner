@@ -29,8 +29,16 @@ export default function GeneralList({ householdId, userId }) {
     const subscription = supabase
       .channel("general_list")
       .on("postgres_changes",
-        { event: "*", schema: "public", table: "general_list_items" },
-        () => fetchItems()
+        { event: "INSERT", schema: "public", table: "general_list_items" },
+        ({ new: row }) => setItems(prev => [...prev, row])
+      )
+      .on("postgres_changes",
+        { event: "UPDATE", schema: "public", table: "general_list_items" },
+        ({ new: row }) => setItems(prev => prev.map(i => i.id === row.id ? row : i))
+      )
+      .on("postgres_changes",
+        { event: "DELETE", schema: "public", table: "general_list_items" },
+        ({ old: row }) => setItems(prev => prev.filter(i => i.id !== row.id))
       )
       .subscribe()
     return () => supabase.removeChannel(subscription)
@@ -49,29 +57,38 @@ export default function GeneralList({ householdId, userId }) {
   async function addItem() {
     if (!form.name.trim()) return
     setSaving(true)
-    await supabase.from("general_list_items").insert({
+    const newItem = {
       household_id: householdId,
       added_by: userId,
       name: form.name.trim(),
       quantity: form.quantity ? parseFloat(form.quantity) : null,
       unit: form.unit || null,
       category: form.category,
-    })
+      checked: false,
+      created_at: new Date().toISOString(),
+    }
+    // Optimistically add with a temp id — subscription will replace it with the real row
+    const tempId = "temp_" + Date.now()
+    setItems(prev => [...prev, { ...newItem, id: tempId }])
     setForm({ name: "", quantity: "", unit: "whole", category: "Other" })
     setShowForm(false)
     setSaving(false)
+    const { data } = await supabase.from("general_list_items").insert(newItem).select().single()
+    // Swap temp row for the real one (subscription may beat us here, that's fine)
+    if (data) setItems(prev => prev.map(i => i.id === tempId ? data : i))
+    else setItems(prev => prev.filter(i => i.id !== tempId))
   }
 
-  async function toggleItem(id, currentChecked) {
-    await supabase.from("general_list_items").update({ checked: !currentChecked }).eq("id", id)
+  function toggleItem(id, currentChecked) {
+    // Optimistic update — no await
+    setItems(prev => prev.map(i => i.id === id ? { ...i, checked: !currentChecked } : i))
+    supabase.from("general_list_items").update({ checked: !currentChecked }).eq("id", id)
   }
 
-  async function clearChecked() {
-    await supabase
-      .from("general_list_items")
-      .delete()
-      .eq("household_id", householdId)
-      .eq("checked", true)
+  function clearChecked() {
+    // Optimistic update — no await
+    setItems(prev => prev.filter(i => !i.checked))
+    supabase.from("general_list_items").delete().eq("household_id", householdId).eq("checked", true)
   }
 
   function formatQty(qty) {
