@@ -6,7 +6,7 @@ const CUISINES = ["Australian","Italian","Asian","Japanese","Chinese","Thai","In
 const MEAL_TYPES = ["Breakfast","Lunch","Dinner","Snack"]
 const UNITS = ["g","kg","ml","l","tsp","tbsp","whole","rasher","slice","sheet","sprig","bunch","head","clove","fillet","steak","can","jar","packet","sachet","pinch","other"]
 
-export default function Recipes({ userId }) {
+export default function Recipes({ householdId }) {
   const [recipes, setRecipes] = useState([])
   const [ingredients, setIngredients] = useState([])
   const [loading, setLoading] = useState(true)
@@ -22,8 +22,8 @@ export default function Recipes({ userId }) {
   async function fetchAll() {
     setLoading(true)
     const [{ data: r }, { data: i }] = await Promise.all([
-      supabase.from("recipes").select("*, recipe_ingredients(*, ingredients(*))").order("name"),
-      supabase.from("ingredients").select("*").order("name")
+      supabase.from("recipes").select("*, recipe_ingredients(*, ingredients(*))").eq("household_id", householdId).order("name"),
+      supabase.from("ingredients").select("*").eq("household_id", householdId).order("name")
     ])
     setRecipes(r || [])
     setIngredients(i || [])
@@ -33,7 +33,7 @@ export default function Recipes({ userId }) {
   async function saveRecipe() {
     if (!form.name.trim()) return
     setSaving(true)
-    const { data: recipe } = await supabase.from("recipes").insert({ ...form, user_id: userId }).select().single()
+    const { data: recipe } = await supabase.from("recipes").insert({ ...form, household_id: householdId }).select().single()
     const valid = recipeIngredients.filter(ri => ri.ingredient_id)
     if (valid.length > 0) {
       await supabase.from("recipe_ingredients").insert(

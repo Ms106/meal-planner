@@ -12,7 +12,7 @@ const UNITS = [
   "can", "jar", "packet", "sachet", "pinch", "other"
 ]
 
-export default function Ingredients({ userId }) {
+export default function Ingredients({ householdId }) {
   const [ingredients, setIngredients] = useState([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
@@ -41,7 +41,7 @@ export default function Ingredients({ userId }) {
     setSaving(true)
     await supabase.from("ingredients").insert({
       ...form,
-      user_id: userId
+      householdId: householdId
     })
     setForm({ name: "", category: "Produce", default_unit: "whole", always_stocked: false })
     setShowForm(false)

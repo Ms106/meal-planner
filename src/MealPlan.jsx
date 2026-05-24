@@ -12,7 +12,7 @@ function getMonday() {
   return d.toISOString().split("T")[0]
 }
 
-export default function MealPlan({ userId }) {
+export default function MealPlan({ householdId }) {
   const [recipes, setRecipes] = useState([])
   const [plan, setPlan] = useState({})
   const [loading, setLoading] = useState(true)
@@ -23,8 +23,8 @@ export default function MealPlan({ userId }) {
   async function fetchAll() {
     setLoading(true)
     const [{ data: r }, { data: p }] = await Promise.all([
-      supabase.from("recipes").select("id, name").order("name"),
-      supabase.from("meal_plan").select("*").eq("week_commencing", week).eq("user_id", userId)
+      supabase.from("recipes").select("id, name").eq("household_id", householdId).order("name"),
+      supabase.from("meal_plan").select("*").eq("week_commencing", week).eq("household_id", householdId)
     ])
     setRecipes(r || [])
     const mapped = {}
@@ -50,14 +50,7 @@ export default function MealPlan({ userId }) {
     if (existing) {
       await supabase.from("meal_plan").update({ recipe_id: recipeId }).eq("id", existing.id)
     } else {
-      await supabase.from("meal_plan").insert({
-        user_id: userId,
-        week_commencing: week,
-        day,
-        meal_slot: slot,
-        recipe_id: recipeId,
-        servings_multiplier: 1.0
-      })
+      await supabase.from("meal_plan").insert({ household_id: householdId, week_commencing: week, day, meal_slot: slot, recipe_id: recipeId, servings_multiplier: 1.0 })
     }
     await fetchAll()
   }
@@ -89,7 +82,6 @@ export default function MealPlan({ userId }) {
           <button onClick={nextWeek} className="text-gray-400 hover:text-gray-600 px-2">→</button>
         </div>
       </div>
-
       {loading ? (
         <p className="text-gray-400 text-sm">Loading...</p>
       ) : (
@@ -104,15 +96,9 @@ export default function MealPlan({ userId }) {
                   return (
                     <div key={slot} className="flex items-center gap-2">
                       <span className="text-xs text-gray-400 w-12">{slot}</span>
-                      <select
-                        value={entry?.recipe_id || ""}
-                        onChange={e => setMeal(day, slot, e.target.value)}
-                        className="flex-1 border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 text-gray-700"
-                      >
+                      <select value={entry?.recipe_id || ""} onChange={e => setMeal(day, slot, e.target.value)} className="flex-1 border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 text-gray-700">
                         <option value="">— no meal planned —</option>
-                        {recipes.map(r => (
-                          <option key={r.id} value={r.id}>{r.name}</option>
-                        ))}
+                        {recipes.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
                       </select>
                     </div>
                   )

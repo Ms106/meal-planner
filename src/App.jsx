@@ -8,20 +8,58 @@ import ShoppingList from "./ShoppingList"
 
 const NAV_ITEMS = ["Ingredients", "Recipes", "Meal Plan", "Shopping List"]
 
+async function getOrCreateHousehold(userId) {
+  // Check if user already belongs to a household
+  const { data: membership } = await supabase
+    .from("household_members")
+    .select("household_id")
+    .eq("user_id", userId)
+    .single()
+
+  if (membership) return membership.household_id
+
+  // Create a new household and add the user to it
+  const { data: household } = await supabase
+    .from("households")
+    .insert({ name: "My Household" })
+    .select()
+    .single()
+
+  await supabase
+    .from("household_members")
+    .insert({ household_id: household.id, user_id: userId })
+
+  return household.id
+}
+
 function App() {
   const [session, setSession] = useState(null)
+  const [householdId, setHouseholdId] = useState(null)
   const [currentPage, setCurrentPage] = useState("Recipes")
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session)
+      if (session) {
+        getOrCreateHousehold(session.user.id).then(setHouseholdId)
+      }
     })
     supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session)
+      if (session) {
+        getOrCreateHousehold(session.user.id).then(setHouseholdId)
+      } else {
+        setHouseholdId(null)
+      }
     })
   }, [])
 
   if (!session) return <Auth />
+  if (!householdId) return (
+    <div className="min-h-screen bg-green-50 flex items-center justify-center">
+      <p className="text-gray-400 text-sm">Setting up your household...</p>
+    </div>
+  )
 
   return (
     <div className="min-h-screen bg-green-50">
@@ -52,13 +90,10 @@ function App() {
       </nav>
 
       <main className="max-w-2xl mx-auto px-4 py-6">
-        {currentPage === "Ingredients" && <Ingredients userId={session.user.id} />}
-        {currentPage === "Recipes" && <p className="text-gray-400 text-sm">Recipes — coming soon</p>}
-        {currentPage === "Meal Plan" && <p className="text-gray-400 text-sm">Meal Plan — coming soon</p>}
-        {currentPage === "Shopping List" && <p className="text-gray-400 text-sm">Shopping List — coming soon</p>}
-{currentPage === "Recipes" && <Recipes userId={session.user.id} />}
-{currentPage === "Meal Plan" && <MealPlan userId={session.user.id} />}
-{currentPage === "Shopping List" && <ShoppingList userId={session.user.id} />}
+        {currentPage === "Ingredients" && <Ingredients householdId={householdId} />}
+        {currentPage === "Recipes" && <Recipes householdId={householdId} />}
+        {currentPage === "Meal Plan" && <MealPlan householdId={householdId} />}
+        {currentPage === "Shopping List" && <ShoppingList householdId={householdId} />}
       </main>
     </div>
   )
