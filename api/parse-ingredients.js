@@ -28,26 +28,7 @@ export default async function handler(req, res) {
         messages: [
           {
             role: "user",
-            content: `Parse the following ingredient list into JSON. Return ONLY a JSON array, no other text, no markdown.
-
-Each item in the array should have these fields:
-- name: string (canonical ingredient name, title case, e.g. "Chicken Breast")
-- quantity: number or null (numeric amount only)
-- unit: string (must be one of: g, kg, ml, l, tsp, tbsp, whole, rasher, slice, sheet, sprig, bunch, head, clove, fillet, steak, can, jar, packet, sachet, pinch, other)
-- preparation: string (e.g. "diced", "minced", or "" if none)
-- category: string (must be one of: Produce, Meat & Seafood, Dairy & Eggs, Deli & Charcuterie, Bakery, Pantry — Dry, Pantry — Condiments, Frozen, Drinks, Other)
-
-Rules:
-- Convert imperial to metric: oz to g (multiply by 28.35, round to nearest 5), cups to ml (multiply by 240), lb to g (multiply by 453.6)
-- If something is clearly countable (eggs, onions, sausages) use "whole" as unit
-- If quantity is "to taste" or missing, set quantity to null and unit to "pinch"
-- Strip any parenthetical clarifications from the name
-- Category guide: fresh fruit/veg = Produce, raw meat/fish = Meat & Seafood, milk/cheese/eggs/butter = Dairy & Eggs, cured meats/deli = Deli & Charcuterie, bread = Bakery, dried pasta/rice/canned goods = Pantry -- Dry, oils/spices/sauces/condiments = Pantry -- Condiments, frozen items = Frozen
-
-Recipe name for context: ${recipeName || "Unknown"}
-
-Ingredient list:
-${text}`
+            content: "Parse the following ingredient list into JSON. Return ONLY a JSON array, no other text, no markdown backticks.\n\nEach item must have:\n- name: string (title case, e.g. Chicken Breast)\n- quantity: number or null\n- unit: one of: g kg ml l tsp tbsp whole rasher slice sheet sprig bunch head clove fillet steak can jar packet sachet pinch other\n- preparation: string (e.g. diced) or empty string\n- category: one of: Produce, Meat and Seafood, Dairy and Eggs, Deli, Bakery, Pantry Dry, Pantry Condiments, Frozen, Drinks, Other\n\nRules:\n- oz to g: multiply by 28.35 round to 5\n- cups to ml: multiply by 240\n- lb to g: multiply by 453.6\n- countable items (eggs onions sausages): use whole\n- missing quantity: null with pinch unit\n- Produce: fresh fruit veg\n- Meat and Seafood: raw meat fish\n- Dairy and Eggs: milk cheese eggs butter\n- Pantry Dry: pasta rice canned goods flour\n- Pantry Condiments: oils spices sauces vinegar\n\nRecipe: " + (recipeName || "Unknown") + "\n\nIngredients:\n" + text
           }
         ]
       })
@@ -60,12 +41,9 @@ ${text}`
     }
 
     const content = data.content[0].text.trim()
+    const cleaned = content.replace(/```json/g, "").replace(/```/g, "").trim()
 
     try {
-      const cleaned = content
-        .replace(/```json/g, "")
-        .replace(/```/g, "")
-        .trim()
       const parsed = JSON.parse(cleaned)
       return res.status(200).json({ ingredients: parsed })
     } catch {

@@ -6,6 +6,17 @@ const CUISINES = ["Australian","Italian","Asian","Japanese","Chinese","Thai","In
 const MEAL_TYPES = ["Breakfast","Lunch","Dinner","Snack"]
 const UNITS = ["g","kg","ml","l","tsp","tbsp","whole","rasher","slice","sheet","sprig","bunch","head","clove","fillet","steak","can","jar","packet","sachet","pinch","other"]
 
+function mapCategory(cat) {
+  const map = {
+    "Meat and Seafood": "Meat & Seafood",
+    "Dairy and Eggs": "Dairy & Eggs",
+    "Deli": "Deli & Charcuterie",
+    "Pantry Dry": "Pantry — Dry",
+    "Pantry Condiments": "Pantry — Condiments",
+  }
+  return map[cat] || cat || "Other"
+}
+
 export default function Recipes({ householdId }) {
   const [recipes, setRecipes] = useState([])
   const [ingredients, setIngredients] = useState([])
@@ -39,8 +50,6 @@ export default function Recipes({ householdId }) {
     if (!pasteText.trim()) return
     setParsing(true)
     setParseError("")
-    console.log("householdId:", householdId)
-    console.log("pasteText:", pasteText.substring(0, 50))
     try {
       const res = await fetch("/api/parse-ingredients", {
         method: "POST",
@@ -51,7 +60,6 @@ export default function Recipes({ householdId }) {
       if (!res.ok) throw new Error(data.error || "Parse failed")
 
       const parsed = data.ingredients
-      console.log("Parsed ingredients:", parsed)
       const newRows = []
       const newIngredients = []
 
@@ -65,22 +73,16 @@ export default function Recipes({ householdId }) {
         }
       }
 
-      console.log("New ingredients to create:", newIngredients)
-      console.log("householdId for insert:", householdId)
-
       if (newIngredients.length > 0) {
-        const insertPayload = newIngredients.map(i => ({
-          name: i.name,
-          category: "Other",
-          default_unit: i.unit || "whole",
-          always_stocked: false,
-          household_id: householdId
-        }))
-        console.log("Insert payload:", insertPayload)
-
         const { data: inserted, error: insertError } = await supabase
           .from("ingredients")
-          .insert(insertPayload)
+          .insert(newIngredients.map(i => ({
+            name: i.name,
+            category: mapCategory(i.category),
+            default_unit: i.unit || "whole",
+            always_stocked: false,
+            household_id: householdId
+          })))
           .select()
 
         if (insertError) {
@@ -89,8 +91,6 @@ export default function Recipes({ householdId }) {
           setParsing(false)
           return
         }
-
-        console.log("Inserted:", inserted)
 
         const { data: freshIngredients } = await supabase
           .from("ingredients")
@@ -121,7 +121,6 @@ export default function Recipes({ householdId }) {
       setPasteText("")
       setShowPaste(false)
     } catch (err) {
-      console.error("Parse error:", err)
       setParseError(err.message)
     }
     setParsing(false)
