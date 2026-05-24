@@ -4,9 +4,10 @@ import Auth from "./Auth"
 import Ingredients from "./Ingredients"
 import Recipes from "./Recipes"
 import MealPlan from "./MealPlan"
+import GeneralList from "./GeneralList"
 import ShoppingList from "./ShoppingList"
 
-const NAV_ITEMS = ["Ingredients", "Recipes", "Meal Plan", "Shopping List"]
+const NAV_ITEMS = ["Ingredients", "Recipes", "Meal Plan", "General List", "Shopping List"]
 
 async function getOrCreateHousehold(userId) {
   // Check if user already belongs to a household
@@ -93,6 +94,7 @@ function App() {
         {currentPage === "Ingredients" && <Ingredients householdId={householdId} />}
         {currentPage === "Recipes" && <Recipes householdId={householdId} />}
         {currentPage === "Meal Plan" && <MealPlan householdId={householdId} />}
+        {currentPage === "General List" && <GeneralList householdId={householdId} userId={session.user.id} />}
         {currentPage === "Shopping List" && <ShoppingList householdId={householdId} />}
       </main>
     </div>
