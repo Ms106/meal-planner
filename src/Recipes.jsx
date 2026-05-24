@@ -39,6 +39,8 @@ export default function Recipes({ householdId }) {
     if (!pasteText.trim()) return
     setParsing(true)
     setParseError("")
+    console.log("householdId:", householdId)
+    console.log("pasteText:", pasteText.substring(0, 50))
     try {
       const res = await fetch("/api/parse-ingredients", {
         method: "POST",
@@ -49,6 +51,7 @@ export default function Recipes({ householdId }) {
       if (!res.ok) throw new Error(data.error || "Parse failed")
 
       const parsed = data.ingredients
+      console.log("Parsed ingredients:", parsed)
       const newRows = []
       const newIngredients = []
 
@@ -62,11 +65,32 @@ export default function Recipes({ householdId }) {
         }
       }
 
-if (newIngredients.length > 0) {
-        const { data: inserted, error: insertError } = await supabase.from("ingredients").insert(
-            if (insertError) console.error("Insert error:", insertError)
-          newIngredients.map(i => ({ name: i.name, category: "Other", default_unit: i.unit || "whole", always_stocked: false, household_id: householdId }))
-        ).select()
+      console.log("New ingredients to create:", newIngredients)
+      console.log("householdId for insert:", householdId)
+
+      if (newIngredients.length > 0) {
+        const insertPayload = newIngredients.map(i => ({
+          name: i.name,
+          category: "Other",
+          default_unit: i.unit || "whole",
+          always_stocked: false,
+          household_id: householdId
+        }))
+        console.log("Insert payload:", insertPayload)
+
+        const { data: inserted, error: insertError } = await supabase
+          .from("ingredients")
+          .insert(insertPayload)
+          .select()
+
+        if (insertError) {
+          console.error("Insert error:", insertError)
+          setParseError("Failed to create ingredients: " + insertError.message)
+          setParsing(false)
+          return
+        }
+
+        console.log("Inserted:", inserted)
 
         const { data: freshIngredients } = await supabase
           .from("ingredients")
@@ -92,10 +116,12 @@ if (newIngredients.length > 0) {
           .order("name")
         if (freshIngredients) setIngredients(freshIngredients)
       }
+
       setRecipeIngredients(newRows)
       setPasteText("")
       setShowPaste(false)
     } catch (err) {
+      console.error("Parse error:", err)
       setParseError(err.message)
     }
     setParsing(false)
@@ -234,8 +260,6 @@ if (newIngredients.length > 0) {
                 <button onClick={addRow} className="text-green-700 text-sm hover:underline">+ Add ingredient row</button>
               </div>
             )}
-
-            {recipeIngredients.length > 0 && recipeIngredients[0].ingredient_id && showPaste === false || (showPaste === false && recipeIngredients.length > 1) ? null : null}
           </div>
 
           {!showPaste && (
