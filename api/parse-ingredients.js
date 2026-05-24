@@ -3,13 +3,17 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "Method not allowed" })
   }
 
-  const { text, recipeName } = req.body
+  // Parse body if it's a string
+  let body = req.body
+  if (typeof body === "string") {
+    try { body = JSON.parse(body) } catch { body = {} }
+  }
+
+  const { text, recipeName } = body || {}
 
   if (!text) {
     return res.status(400).json({ error: "No ingredient text provided" })
-  }
-
-  try {
+  }  try {
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
