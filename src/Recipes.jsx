@@ -62,12 +62,18 @@ export default function Recipes({ householdId }) {
         }
       }
 
-      if (newIngredients.length > 0) {
+if (newIngredients.length > 0) {
         const { data: inserted } = await supabase.from("ingredients").insert(
           newIngredients.map(i => ({ name: i.name, category: "Other", default_unit: i.unit || "whole", always_stocked: false, household_id: householdId }))
         ).select()
 
-        const allIngredients = [...ingredients, ...(inserted || [])]
+        const { data: freshIngredients } = await supabase
+          .from("ingredients")
+          .select("*")
+          .eq("household_id", householdId)
+          .order("name")
+
+        const allIngredients = freshIngredients || [...ingredients, ...(inserted || [])]
         setIngredients(allIngredients)
 
         for (const row of newRows) {
@@ -77,8 +83,14 @@ export default function Recipes({ householdId }) {
             delete row._newName
           }
         }
+      } else {
+        const { data: freshIngredients } = await supabase
+          .from("ingredients")
+          .select("*")
+          .eq("household_id", householdId)
+          .order("name")
+        if (freshIngredients) setIngredients(freshIngredients)
       }
-
       setRecipeIngredients(newRows)
       setPasteText("")
       setShowPaste(false)
