@@ -24,7 +24,7 @@ export default async function handler(req, res) {
       },
       body: JSON.stringify({
         model: "claude-haiku-4-5-20251001",
-        max_tokens: 1024,
+        max_tokens: 2048,
         messages: [
           {
             role: "user",
@@ -41,8 +41,7 @@ export default async function handler(req, res) {
     }
 
     const content = data.content[0].text.trim()
-    const cleaned = content.replace(/```json/g, "").replace(/```/g, "").trim()
-
+const cleaned = content.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim()
     try {
       const parsed = JSON.parse(cleaned)
       return res.status(200).json({ ingredients: parsed })
