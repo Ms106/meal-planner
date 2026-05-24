@@ -13,6 +13,11 @@ export default function Recipes({ householdId }) {
   const [showForm, setShowForm] = useState(false)
   const [expandedId, setExpandedId] = useState(null)
   const [saving, setSaving] = useState(false)
+  const [pasteText, setPasteText] = useState("")
+  const [parsing, setParsing] = useState(false)
+  const [parseError, setParseError] = useState("")
+  const [showPaste, setShowPaste] = useState(false)
+
   const emptyForm = { name: "", serves: 4, protein: "Chicken", cuisine: "Italian", meal_type: "Dinner", source_url: "", notes: "" }
   const [form, setForm] = useState(emptyForm)
   const [recipeIngredients, setRecipeIngredients] = useState([{ ingredient_id: "", quantity: "", unit: "whole", preparation: "" }])
@@ -30,6 +35,59 @@ export default function Recipes({ householdId }) {
     setLoading(false)
   }
 
+  async function parseIngredients() {
+    if (!pasteText.trim()) return
+    setParsing(true)
+    setParseError("")
+    try {
+      const res = await fetch("/api/parse-ingredients", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: pasteText, recipeName: form.name })
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || "Parse failed")
+
+      const parsed = data.ingredients
+      const newRows = []
+      const newIngredients = []
+
+      for (const item of parsed) {
+        const existing = ingredients.find(i => i.name.toLowerCase() === item.name.toLowerCase())
+        if (existing) {
+          newRows.push({ ingredient_id: existing.id, quantity: item.quantity || "", unit: item.unit || "whole", preparation: item.preparation || "" })
+        } else {
+          newIngredients.push(item)
+          newRows.push({ ingredient_id: "", quantity: item.quantity || "", unit: item.unit || "whole", preparation: item.preparation || "", _newName: item.name })
+        }
+      }
+
+      if (newIngredients.length > 0) {
+        const { data: inserted } = await supabase.from("ingredients").insert(
+          newIngredients.map(i => ({ name: i.name, category: "Other", default_unit: i.unit || "whole", always_stocked: false, household_id: householdId }))
+        ).select()
+
+        const allIngredients = [...ingredients, ...(inserted || [])]
+        setIngredients(allIngredients)
+
+        for (const row of newRows) {
+          if (row._newName) {
+            const match = allIngredients.find(i => i.name.toLowerCase() === row._newName.toLowerCase())
+            if (match) row.ingredient_id = match.id
+            delete row._newName
+          }
+        }
+      }
+
+      setRecipeIngredients(newRows)
+      setPasteText("")
+      setShowPaste(false)
+    } catch (err) {
+      setParseError(err.message)
+    }
+    setParsing(false)
+  }
+
   async function saveRecipe() {
     if (!form.name.trim()) return
     setSaving(true)
@@ -43,6 +101,8 @@ export default function Recipes({ householdId }) {
     setForm(emptyForm)
     setRecipeIngredients([{ ingredient_id: "", quantity: "", unit: "whole", preparation: "" }])
     setShowForm(false)
+    setShowPaste(false)
+    setPasteText("")
     await fetchAll()
     setSaving(false)
   }
@@ -103,37 +163,80 @@ export default function Recipes({ householdId }) {
           </div>
           <input type="url" placeholder="Source URL (optional)" value={form.source_url} onChange={e => setForm({ ...form, source_url: e.target.value })} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
           <textarea placeholder="Notes (optional)" value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} rows={2} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
-          <p className="font-medium text-gray-700 text-sm pt-2">Ingredients</p>
-          <p className="text-xs text-gray-400 -mt-2">Add ingredients to your master list first if they do not appear here.</p>
-          {recipeIngredients.map((ri, index) => (
-            <div key={index} className="grid grid-cols-12 gap-1 items-center">
-              <div className="col-span-5">
-                <select value={ri.ingredient_id} onChange={e => updateRow(index, "ingredient_id", e.target.value)} className="w-full border border-gray-300 rounded-lg px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
-                  <option value="">Select...</option>
-                  {ingredients.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
-                </select>
-              </div>
-              <div className="col-span-2">
-                <input type="number" placeholder="Qty" value={ri.quantity} onChange={e => updateRow(index, "quantity", e.target.value)} className="w-full border border-gray-300 rounded-lg px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
-              </div>
-              <div className="col-span-2">
-                <select value={ri.unit} onChange={e => updateRow(index, "unit", e.target.value)} className="w-full border border-gray-300 rounded-lg px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
-                  {UNITS.map(u => <option key={u}>{u}</option>)}
-                </select>
-              </div>
-              <div className="col-span-2">
-                <input type="text" placeholder="Prep" value={ri.preparation} onChange={e => updateRow(index, "preparation", e.target.value)} className="w-full border border-gray-300 rounded-lg px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
-              </div>
-              <div className="col-span-1 flex justify-center">
-                <button onClick={() => removeRow(index)} className="text-gray-300 hover:text-red-400 text-lg">x</button>
-              </div>
+
+          <div className="border-t border-gray-100 pt-3">
+            <div className="flex items-center justify-between mb-2">
+              <p className="font-medium text-gray-700 text-sm">Ingredients</p>
+              <button onClick={() => setShowPaste(!showPaste)} className="text-xs text-green-700 hover:underline">
+                {showPaste ? "Add manually instead" : "Paste from recipe"}
+              </button>
             </div>
-          ))}
-          <button onClick={addRow} className="text-green-700 text-sm hover:underline">+ Add ingredient row</button>
-          <div className="flex gap-2 pt-2">
-            <button onClick={saveRecipe} disabled={saving} className="flex-1 bg-green-700 text-white rounded-lg py-2 text-sm font-medium hover:bg-green-800 disabled:opacity-50">{saving ? "Saving..." : "Save recipe"}</button>
-            <button onClick={() => setShowForm(false)} className="flex-1 border border-gray-300 rounded-lg py-2 text-sm text-gray-600 hover:bg-gray-50">Cancel</button>
+
+            {showPaste ? (
+              <div className="space-y-2">
+                <p className="text-xs text-gray-400">Copy the ingredient list from any recipe website and paste it below. AI will parse it automatically.</p>
+                <textarea
+                  placeholder={"1 cup flour\n2 eggs\n200g butter\n..."}
+                  value={pasteText}
+                  onChange={e => setPasteText(e.target.value)}
+                  rows={6}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 font-mono"
+                />
+                {parseError && <p className="text-xs text-red-500">{parseError}</p>}
+                <button
+                  onClick={parseIngredients}
+                  disabled={parsing || !pasteText.trim()}
+                  className="w-full bg-green-700 text-white rounded-lg py-2 text-sm font-medium hover:bg-green-800 disabled:opacity-50"
+                >
+                  {parsing ? "Parsing..." : "Parse ingredients"}
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <p className="text-xs text-gray-400 -mt-1">Add ingredients to your master list first if they do not appear here.</p>
+                {recipeIngredients.map((ri, index) => (
+                  <div key={index} className="grid grid-cols-12 gap-1 items-center">
+                    <div className="col-span-5">
+                      <select value={ri.ingredient_id} onChange={e => updateRow(index, "ingredient_id", e.target.value)} className="w-full border border-gray-300 rounded-lg px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
+                        <option value="">Select...</option>
+                        {ingredients.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
+                      </select>
+                    </div>
+                    <div className="col-span-2">
+                      <input type="number" placeholder="Qty" value={ri.quantity} onChange={e => updateRow(index, "quantity", e.target.value)} className="w-full border border-gray-300 rounded-lg px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+                    </div>
+                    <div className="col-span-2">
+                      <select value={ri.unit} onChange={e => updateRow(index, "unit", e.target.value)} className="w-full border border-gray-300 rounded-lg px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
+                        {UNITS.map(u => <option key={u}>{u}</option>)}
+                      </select>
+                    </div>
+                    <div className="col-span-2">
+                      <input type="text" placeholder="Prep" value={ri.preparation} onChange={e => updateRow(index, "preparation", e.target.value)} className="w-full border border-gray-300 rounded-lg px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+                    </div>
+                    <div className="col-span-1 flex justify-center">
+                      <button onClick={() => removeRow(index)} className="text-gray-300 hover:text-red-400 text-lg">x</button>
+                    </div>
+                  </div>
+                ))}
+                <button onClick={addRow} className="text-green-700 text-sm hover:underline">+ Add ingredient row</button>
+              </div>
+            )}
+
+            {recipeIngredients.length > 0 && recipeIngredients[0].ingredient_id && showPaste === false || (showPaste === false && recipeIngredients.length > 1) ? null : null}
           </div>
+
+          {!showPaste && (
+            <div className="flex gap-2 pt-2">
+              <button onClick={saveRecipe} disabled={saving} className="flex-1 bg-green-700 text-white rounded-lg py-2 text-sm font-medium hover:bg-green-800 disabled:opacity-50">{saving ? "Saving..." : "Save recipe"}</button>
+              <button onClick={() => { setShowForm(false); setShowPaste(false); setPasteText("") }} className="flex-1 border border-gray-300 rounded-lg py-2 text-sm text-gray-600 hover:bg-gray-50">Cancel</button>
+            </div>
+          )}
+
+          {showPaste && pasteText === "" && (
+            <div className="flex gap-2 pt-2">
+              <button onClick={() => { setShowForm(false); setShowPaste(false) }} className="flex-1 border border-gray-300 rounded-lg py-2 text-sm text-gray-600 hover:bg-gray-50">Cancel</button>
+            </div>
+          )}
         </div>
       )}
 
