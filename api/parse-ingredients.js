@@ -55,7 +55,11 @@ ${text}`
     const content = data.content[0].text.trim()
 
     try {
-      const parsed = JSON.parse(content)
+      const cleaned = content
+        .replace(/```json/g, "")
+        .replace(/```/g, "")
+        .trim()
+      const parsed = JSON.parse(cleaned)
       return res.status(200).json({ ingredients: parsed })
     } catch {
       return res.status(500).json({ error: "Failed to parse AI response", raw: content })
