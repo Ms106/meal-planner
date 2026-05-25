@@ -20,22 +20,22 @@ export default function ShoppingList({ householdId }) {
   const [view, setView] = useState("Recipes")
   const [week, setWeek] = useState(getMonday())
 
-  // Recipe list state
   const [recipeItems, setRecipeItems] = useState([])
   const [recipeChecked, setRecipeChecked] = useState({})
   const [recipeLoading, setRecipeLoading] = useState(true)
 
-  // General list state (used by General and Combined views)
   const [generalItems, setGeneralItems] = useState([])
   const [generalLoading, setGeneralLoading] = useState(true)
 
-  // Separate checked state for recipe items in the Combined view
   const [combinedRecipeChecked, setCombinedRecipeChecked] = useState({})
+
+  const [freezerItems, setFreezerItems] = useState([])
 
   useEffect(() => { fetchRecipeList() }, [week])
 
   useEffect(() => {
     fetchGeneralItems()
+    fetchFreezerItems()
     const subscription = supabase
       .channel("shopping_list_general")
       .on("postgres_changes",
@@ -128,6 +128,14 @@ export default function ShoppingList({ householdId }) {
     setGeneralLoading(false)
   }
 
+  async function fetchFreezerItems() {
+    const { data } = await supabase
+      .from("freezer_items")
+      .select("id, name, quantity, unit")
+      .eq("household_id", householdId)
+    setFreezerItems(data || [])
+  }
+
   function toggleGeneralItem(id, currentChecked) {
     setGeneralItems(prev => prev.map(i => i.id === id ? { ...i, checked: !currentChecked } : i))
     supabase.from("general_list_items").update({ checked: !currentChecked }).eq("id", id)
@@ -155,6 +163,35 @@ export default function ShoppingList({ householdId }) {
     return qty === Math.floor(qty) ? String(Math.floor(qty)) : qty.toFixed(1)
   }
 
+  // Returns null if no freezer match, otherwise { status, freezerQty, unit, needed? }
+  // status: "full" | "partial" | "present" (name match but different/no unit overlap)
+  function getFreezerCoverage(name, unit, requiredQty) {
+    const lowerName = name.toLowerCase().trim()
+    const matches = freezerItems.filter(fi => {
+      const a = fi.name.toLowerCase().trim()
+      return a === lowerName || a.includes(lowerName) || lowerName.includes(a)
+    })
+    if (matches.length === 0) return null
+
+    if (requiredQty == null) {
+      const totalQty = matches.reduce((sum, fi) => sum + fi.quantity, 0)
+      return { status: "present", freezerQty: totalQty, unit: matches[0].unit }
+    }
+
+    const sameUnitQty = matches
+      .filter(fi => fi.unit === unit)
+      .reduce((sum, fi) => sum + fi.quantity, 0)
+
+    if (sameUnitQty >= requiredQty) {
+      return { status: "full", freezerQty: sameUnitQty, unit }
+    } else if (sameUnitQty > 0) {
+      return { status: "partial", freezerQty: sameUnitQty, unit, needed: requiredQty - sameUnitQty }
+    } else {
+      const totalQty = matches.reduce((sum, fi) => sum + fi.quantity, 0)
+      return { status: "present", freezerQty: totalQty, unit: matches[0].unit }
+    }
+  }
+
   const recipeGrouped = CATEGORY_ORDER.reduce((acc, cat) => {
     const catItems = recipeItems.filter(i => i.category === cat)
     if (catItems.length > 0) acc[cat] = catItems
@@ -167,7 +204,6 @@ export default function ShoppingList({ householdId }) {
     return acc
   }, {})
 
-  // Combine by category — recipe items flagged with source, general items flagged separately
   const combinedGrouped = CATEGORY_ORDER.reduce((acc, cat) => {
     const rItems = (recipeGrouped[cat] || []).map(i => ({
       ...i,
@@ -203,6 +239,20 @@ export default function ShoppingList({ householdId }) {
         {checked && <span className="text-white text-xs">✓</span>}
       </div>
     )
+  }
+
+  function FreezerNote({ coverage, isChecked }) {
+    if (isChecked || !coverage) return null
+    if (coverage.status === "full") {
+      return <p className="text-xs text-cyan-500 mt-0.5">In freezer ✓</p>
+    }
+    if (coverage.status === "partial") {
+      return <p className="text-xs text-cyan-500 mt-0.5">partial — {formatQty(coverage.freezerQty)} {coverage.unit} in freezer</p>
+    }
+    if (coverage.status === "present") {
+      return <p className="text-xs text-cyan-500 mt-0.5">{formatQty(coverage.freezerQty)} {coverage.unit} in freezer</p>
+    }
+    return null
   }
 
   return (
@@ -252,6 +302,10 @@ export default function ShoppingList({ householdId }) {
                       {catItems.map(item => {
                         const key = item.name + "__" + item.unit
                         const isChecked = !!recipeChecked[key]
+                        const coverage = getFreezerCoverage(item.name, item.unit, item.quantity)
+                        const displayQty = coverage?.status === "partial"
+                          ? coverage.needed
+                          : item.quantity
                         return (
                           <div
                             key={key}
@@ -260,13 +314,17 @@ export default function ShoppingList({ householdId }) {
                           >
                             <div className="flex items-center gap-3">
                               <CheckCircle checked={isChecked} />
-                              <span className={`text-sm ${isChecked ? "line-through text-gray-300" : "text-gray-700"}`}>
-                                {item.name}
-                                {item.always_stocked && <span className="ml-1 text-xs text-gray-300">(check pantry)</span>}
-                              </span>
+                              <div>
+                                <div className={`text-sm ${isChecked ? "line-through text-gray-300" : coverage?.status === "full" ? "text-gray-400" : "text-gray-700"}`}>
+                                  {coverage && !isChecked && <span className="text-cyan-400 mr-1">❄</span>}
+                                  {item.name}
+                                  {item.always_stocked && <span className="ml-1 text-xs text-gray-300">(check pantry)</span>}
+                                </div>
+                                <FreezerNote coverage={coverage} isChecked={isChecked} />
+                              </div>
                             </div>
-                            <span className={`text-sm font-medium tabular-nums ${isChecked ? "text-gray-300" : "text-gray-500"}`}>
-                              {formatQty(item.quantity)} {item.unit}
+                            <span className={`text-sm font-medium tabular-nums ${isChecked ? "text-gray-300" : coverage?.status === "full" ? "text-gray-300" : "text-gray-500"}`}>
+                              {formatQty(displayQty)} {item.unit}
                             </span>
                           </div>
                         )
@@ -300,23 +358,31 @@ export default function ShoppingList({ householdId }) {
                   <div key={category}>
                     <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">{category}</h3>
                     <div className="bg-white rounded-xl shadow-sm divide-y divide-gray-100">
-                      {catItems.map(item => (
-                        <div
-                          key={item.id}
-                          onClick={() => toggleGeneralItem(item.id, item.checked)}
-                          className={`flex items-center justify-between px-4 py-3 cursor-pointer transition-colors ${item.checked ? "bg-gray-50" : ""}`}
-                        >
-                          <div className="flex items-center gap-3">
-                            <CheckCircle checked={item.checked} />
-                            <span className={`text-sm ${item.checked ? "line-through text-gray-300" : "text-gray-700"}`}>
-                              {item.name}
+                      {catItems.map(item => {
+                        const coverage = getFreezerCoverage(item.name, item.unit, item.quantity)
+                        const displayQty = coverage?.status === "partial" ? coverage.needed : item.quantity
+                        return (
+                          <div
+                            key={item.id}
+                            onClick={() => toggleGeneralItem(item.id, item.checked)}
+                            className={`flex items-center justify-between px-4 py-3 cursor-pointer transition-colors ${item.checked ? "bg-gray-50" : ""}`}
+                          >
+                            <div className="flex items-center gap-3">
+                              <CheckCircle checked={item.checked} />
+                              <div>
+                                <div className={`text-sm ${item.checked ? "line-through text-gray-300" : coverage?.status === "full" ? "text-gray-400" : "text-gray-700"}`}>
+                                  {coverage && !item.checked && <span className="text-cyan-400 mr-1">❄</span>}
+                                  {item.name}
+                                </div>
+                                <FreezerNote coverage={coverage} isChecked={item.checked} />
+                              </div>
+                            </div>
+                            <span className={`text-sm font-medium tabular-nums ${item.checked ? "text-gray-300" : coverage?.status === "full" ? "text-gray-300" : "text-gray-500"}`}>
+                              {formatQty(displayQty)}{displayQty && item.unit !== "other" ? ` ${item.unit}` : ""}
                             </span>
                           </div>
-                          <span className={`text-sm font-medium tabular-nums ${item.checked ? "text-gray-300" : "text-gray-500"}`}>
-                            {formatQty(item.quantity)}{item.quantity && item.unit !== "other" ? ` ${item.unit}` : ""}
-                          </span>
-                        </div>
-                      ))}
+                        )
+                      })}
                     </div>
                   </div>
                 ))}
@@ -349,6 +415,8 @@ export default function ShoppingList({ householdId }) {
                       const isChecked = item._source === "general"
                         ? item.checked
                         : !!combinedRecipeChecked[item._key]
+                      const coverage = getFreezerCoverage(item.name, item.unit, item.quantity)
+                      const displayQty = coverage?.status === "partial" ? coverage.needed : item.quantity
                       return (
                         <div
                           key={item._key}
@@ -364,21 +432,23 @@ export default function ShoppingList({ householdId }) {
                           <div className="flex items-center gap-3">
                             <CheckCircle checked={isChecked} />
                             <div>
-                              <span className={`text-sm ${isChecked ? "line-through text-gray-300" : "text-gray-700"}`}>
+                              <div className={`text-sm ${isChecked ? "line-through text-gray-300" : coverage?.status === "full" ? "text-gray-400" : "text-gray-700"}`}>
+                                {coverage && !isChecked && <span className="text-cyan-400 mr-1">❄</span>}
                                 {item.name}
                                 {item.always_stocked && <span className="ml-1 text-xs text-gray-300">(check pantry)</span>}
-                              </span>
+                              </div>
                               {item._source === "recipe" && item.recipes?.length > 0 && (
                                 <p className={`text-xs ${isChecked ? "text-gray-300" : "text-gray-400"}`}>
                                   {item.recipes.join(", ")}
                                 </p>
                               )}
+                              <FreezerNote coverage={coverage} isChecked={isChecked} />
                             </div>
                           </div>
-                          <span className={`text-sm font-medium tabular-nums ${isChecked ? "text-gray-300" : "text-gray-500"}`}>
+                          <span className={`text-sm font-medium tabular-nums ${isChecked ? "text-gray-300" : coverage?.status === "full" ? "text-gray-300" : "text-gray-500"}`}>
                             {item._source === "recipe"
-                              ? `${formatQty(item.quantity)} ${item.unit}`
-                              : `${formatQty(item.quantity)}${item.quantity && item.unit !== "other" ? ` ${item.unit}` : ""}`
+                              ? `${formatQty(displayQty)} ${item.unit}`
+                              : `${formatQty(displayQty)}${displayQty && item.unit !== "other" ? ` ${item.unit}` : ""}`
                             }
                           </span>
                         </div>
