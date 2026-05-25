@@ -130,13 +130,15 @@ export default function Freezer({ householdId }) {
     if (packCount === 1) {
       const tempId = "temp_" + Date.now()
       setItems(prev => [...prev, { ...baseItem, id: tempId, created_at: new Date().toISOString() }])
-      const { data } = await supabase.from("freezer_items").insert(baseItem).select().single()
+      const { data, error } = await supabase.from("freezer_items").insert(baseItem).select().single()
+      if (error) console.error("Freezer insert error:", error)
       if (data) setItems(prev => prev.map(i => i.id === tempId ? data : i))
       else setItems(prev => prev.filter(i => i.id !== tempId))
     } else {
       // Insert N rows — subscription callbacks will add each to state
       const rows = Array.from({ length: packCount }, () => ({ ...baseItem }))
-      await supabase.from("freezer_items").insert(rows)
+      const { error } = await supabase.from("freezer_items").insert(rows)
+      if (error) console.error("Freezer bulk insert error:", error)
     }
   }
 
