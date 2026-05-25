@@ -27,6 +27,7 @@ const DEFAULT_FORM = {
   category: "Meat & Seafood",
   quantity: "",
   unit: "g",
+  packs: "1",
   date_frozen: new Date().toISOString().split("T")[0],
   use_by: "",
   notes: "",
@@ -43,6 +44,16 @@ function getUseByStatus(useby) {
   if (diffDays < 0) return "expired"
   if (diffDays <= 7) return "soon"
   return "ok"
+}
+
+function worstUseByStatus(groupItems) {
+  let worst = null
+  for (const item of groupItems) {
+    const s = getUseByStatus(item.use_by)
+    if (s === "expired") return "expired"
+    if (s === "soon") worst = "soon"
+  }
+  return worst
 }
 
 function formatQty(qty) {
@@ -99,8 +110,9 @@ export default function Freezer({ householdId }) {
 
   async function addItem() {
     if (!form.name.trim() || !form.quantity) return
+    const packCount = Math.max(1, parseInt(form.packs) || 1)
     setSaving(true)
-    const newItem = {
+    const baseItem = {
       household_id: householdId,
       name: form.name.trim(),
       category: form.category,
@@ -111,14 +123,21 @@ export default function Freezer({ householdId }) {
       notes: form.notes.trim() || null,
       low_stock_threshold: form.low_stock_threshold ? parseFloat(form.low_stock_threshold) : null,
     }
-    const tempId = "temp_" + Date.now()
-    setItems(prev => [...prev, { ...newItem, id: tempId, created_at: new Date().toISOString() }])
     setForm(DEFAULT_FORM)
     setShowForm(false)
     setSaving(false)
-    const { data } = await supabase.from("freezer_items").insert(newItem).select().single()
-    if (data) setItems(prev => prev.map(i => i.id === tempId ? data : i))
-    else setItems(prev => prev.filter(i => i.id !== tempId))
+
+    if (packCount === 1) {
+      const tempId = "temp_" + Date.now()
+      setItems(prev => [...prev, { ...baseItem, id: tempId, created_at: new Date().toISOString() }])
+      const { data } = await supabase.from("freezer_items").insert(baseItem).select().single()
+      if (data) setItems(prev => prev.map(i => i.id === tempId ? data : i))
+      else setItems(prev => prev.filter(i => i.id !== tempId))
+    } else {
+      // Insert N rows — subscription callbacks will add each to state
+      const rows = Array.from({ length: packCount }, () => ({ ...baseItem }))
+      await supabase.from("freezer_items").insert(rows)
+    }
   }
 
   function openUseModal(item) {
@@ -144,6 +163,14 @@ export default function Freezer({ householdId }) {
     setUseAmount("")
   }
 
+  // Removes the oldest item in a name+category group (FIFO)
+  function useOneFromGroup(groupItems) {
+    const oldest = [...groupItems].sort((a, b) => new Date(a.created_at) - new Date(b.created_at))[0]
+    if (!oldest) return
+    setItems(prev => prev.filter(i => i.id !== oldest.id))
+    supabase.from("freezer_items").delete().eq("id", oldest.id)
+  }
+
   function deleteItem(id) {
     setItems(prev => prev.filter(i => i.id !== id))
     supabase.from("freezer_items").delete().eq("id", id)
@@ -155,14 +182,29 @@ export default function Freezer({ householdId }) {
     setShowForm(true)
   }
 
+  // Group by category, then by name within each category
   const grouped = CATEGORY_ORDER.reduce((acc, cat) => {
     const catItems = items.filter(i => i.category === cat)
-    if (catItems.length > 0) acc[cat] = catItems
+    if (catItems.length === 0) return acc
+    const byName = {}
+    for (const item of catItems) {
+      if (!byName[item.name]) byName[item.name] = []
+      byName[item.name].push(item)
+    }
+    acc[cat] = byName
     return acc
   }, {})
   const knownCategories = new Set(CATEGORY_ORDER)
   const overflow = items.filter(i => !knownCategories.has(i.category))
-  if (overflow.length > 0) grouped["Other"] = [...(grouped["Other"] || []), ...overflow]
+  if (overflow.length > 0) {
+    if (!grouped["Other"]) grouped["Other"] = {}
+    for (const item of overflow) {
+      if (!grouped["Other"][item.name]) grouped["Other"][item.name] = []
+      grouped["Other"][item.name].push(item)
+    }
+  }
+
+  const packCount = parseInt(form.packs) || 1
 
   return (
     <div>
@@ -218,20 +260,44 @@ export default function Freezer({ householdId }) {
             className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
           />
           <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="text-xs text-gray-500 mb-1 block">
+                {packCount > 1 ? "Size per pack" : "Quantity"}
+              </label>
+              <input
+                type="number"
+                placeholder="e.g. 500"
+                value={form.quantity}
+                onChange={e => setForm({ ...form, quantity: e.target.value })}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-gray-500 mb-1 block">Unit</label>
+              <select
+                value={form.unit}
+                onChange={e => setForm({ ...form, unit: e.target.value })}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+              >
+                {UNITS.map(u => <option key={u}>{u}</option>)}
+              </select>
+            </div>
+          </div>
+          <div>
+            <label className="text-xs text-gray-500 mb-1 block">Number of packs</label>
             <input
               type="number"
-              placeholder="Quantity"
-              value={form.quantity}
-              onChange={e => setForm({ ...form, quantity: e.target.value })}
-              className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+              min="1"
+              placeholder="1"
+              value={form.packs}
+              onChange={e => setForm({ ...form, packs: e.target.value })}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
             />
-            <select
-              value={form.unit}
-              onChange={e => setForm({ ...form, unit: e.target.value })}
-              className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
-            >
-              {UNITS.map(u => <option key={u}>{u}</option>)}
-            </select>
+            {packCount > 1 && (
+              <p className="text-xs text-green-700 mt-1">
+                Adding {packCount} × {form.quantity || "?"}{form.unit !== "other" ? form.unit : ""} packs
+              </p>
+            )}
           </div>
           <select
             value={form.category}
@@ -280,7 +346,7 @@ export default function Freezer({ householdId }) {
               disabled={saving || !form.name.trim() || !form.quantity}
               className="flex-1 bg-green-700 text-white rounded-lg py-2 text-sm font-medium hover:bg-green-800 disabled:opacity-50"
             >
-              {saving ? "Adding..." : "Add to freezer"}
+              {saving ? "Adding..." : packCount > 1 ? `Add ${packCount} packs` : "Add to freezer"}
             </button>
             <button
               onClick={() => { setShowForm(false); setForm(DEFAULT_FORM) }}
@@ -297,7 +363,7 @@ export default function Freezer({ householdId }) {
           <div className="bg-white rounded-t-2xl p-5 w-full max-w-lg" onClick={e => e.stopPropagation()}>
             <p className="text-sm font-semibold text-gray-800 mb-1">Use from freezer</p>
             <p className="text-xs text-gray-400 mb-4">
-              {useModal.name} — {formatQty(useModal.quantity)} {useModal.unit !== "other" ? useModal.unit : ""} remaining
+              {useModal.name} — {formatQty(useModal.quantity)}{useModal.unit !== "other" ? ` ${useModal.unit}` : ""} remaining
             </p>
             <div className="flex gap-2 items-center">
               <input
@@ -341,16 +407,22 @@ export default function Freezer({ householdId }) {
         </div>
       ) : (
         <div className="space-y-4">
-          {Object.entries(grouped).map(([category, catItems]) => (
+          {Object.entries(grouped).map(([category, byName]) => (
             <div key={category}>
               <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">{category}</h3>
               <div className="bg-white rounded-xl shadow-sm divide-y divide-gray-100">
-                {catItems.map(item => {
-                  const useByStatus = getUseByStatus(item.use_by)
-                  const isLow = item.low_stock_threshold != null && item.quantity <= item.low_stock_threshold
+                {Object.entries(byName).map(([name, groupItems]) => {
+                  const sorted = [...groupItems].sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+                  const count = sorted.length
+                  const oldest = sorted[0]
+                  const useByStatus = worstUseByStatus(sorted)
+                  const allSameQty = sorted.every(i => i.quantity === oldest.quantity && i.unit === oldest.unit)
+                  const isLow = oldest.low_stock_threshold != null &&
+                    sorted.reduce((sum, i) => sum + i.quantity, 0) <= oldest.low_stock_threshold
+
                   return (
                     <div
-                      key={item.id}
+                      key={name}
                       className={`px-4 py-3 ${
                         useByStatus === "expired" ? "bg-red-50" : useByStatus === "soon" ? "bg-amber-50" : ""
                       }`}
@@ -358,7 +430,12 @@ export default function Freezer({ householdId }) {
                       <div className="flex items-center justify-between gap-3">
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 flex-wrap">
-                            <span className="text-sm font-medium text-gray-800">{item.name}</span>
+                            <span className="text-sm font-medium text-gray-800">{name}</span>
+                            {count > 1 && (
+                              <span className="text-xs bg-green-100 text-green-800 px-1.5 py-0.5 rounded-full font-medium">
+                                × {count} packs
+                              </span>
+                            )}
                             {isLow && (
                               <span className="text-xs bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded-full">
                                 Running low
@@ -377,33 +454,45 @@ export default function Freezer({ householdId }) {
                           </div>
                           <div className="flex items-center gap-3 mt-0.5 flex-wrap">
                             <span className="text-sm text-gray-600 font-medium tabular-nums">
-                              {formatQty(item.quantity)}{item.unit !== "other" ? ` ${item.unit}` : ""}
+                              {allSameQty
+                                ? `${formatQty(oldest.quantity)}${oldest.unit !== "other" ? oldest.unit : ""}${count > 1 ? " each" : ""}`
+                                : `${formatQty(sorted.reduce((s, i) => s + i.quantity, 0))}${oldest.unit !== "other" ? oldest.unit : ""} total`
+                              }
                             </span>
-                            {item.date_frozen && (
-                              <span className="text-xs text-gray-400">frozen {formatDate(item.date_frozen)}</span>
+                            {oldest.date_frozen && (
+                              <span className="text-xs text-gray-400">frozen {formatDate(oldest.date_frozen)}</span>
                             )}
-                            {item.use_by && (
+                            {oldest.use_by && (
                               <span className={`text-xs ${
                                 useByStatus === "expired" ? "text-red-500" :
                                 useByStatus === "soon" ? "text-amber-600" : "text-gray-400"
                               }`}>
-                                use by {formatDate(item.use_by)}
+                                use by {formatDate(oldest.use_by)}
                               </span>
                             )}
                           </div>
-                          {item.notes && (
-                            <p className="text-xs text-gray-400 mt-0.5">{item.notes}</p>
+                          {oldest.notes && (
+                            <p className="text-xs text-gray-400 mt-0.5">{oldest.notes}</p>
                           )}
                         </div>
                         <div className="flex items-center gap-2 flex-shrink-0">
+                          {count > 1 ? (
+                            <button
+                              onClick={() => useOneFromGroup(sorted)}
+                              className="text-xs bg-green-100 text-green-800 px-2.5 py-1 rounded-lg hover:bg-green-200 font-medium whitespace-nowrap"
+                            >
+                              Use one
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => openUseModal(oldest)}
+                              className="text-xs bg-green-100 text-green-800 px-2.5 py-1 rounded-lg hover:bg-green-200 font-medium"
+                            >
+                              Use
+                            </button>
+                          )}
                           <button
-                            onClick={() => openUseModal(item)}
-                            className="text-xs bg-green-100 text-green-800 px-2.5 py-1 rounded-lg hover:bg-green-200 font-medium"
-                          >
-                            Use
-                          </button>
-                          <button
-                            onClick={() => deleteItem(item.id)}
+                            onClick={() => deleteItem(oldest.id)}
                             className="text-gray-300 hover:text-red-400 text-lg leading-none"
                           >
                             ×
